@@ -8,6 +8,7 @@ import pathlib
 import string
 import secrets
 import subprocess
+import pyotp
 import pyperclip
 from select import select
 from pathlib import Path
@@ -162,6 +163,13 @@ def prompt_key():
     id, _ = name.split(":", 2)
     return id
 
+def is_otp_url(key: str):
+    return key.startswith("otpauth://")
+
+def totp(url: str):
+    otp = pyotp.parse_uri(url.strip())
+    return otp.now()
+
 
 @handles("init", "i")
 def init(keyname=None):
@@ -198,8 +206,14 @@ def init(keyname=None):
 def clip(name=None):
     if name is None:
         name = prompt_name(True)
-    decrypted = decrypt(name)
-    pyperclip.copy(str(decrypted))
+    decrypted = str(decrypt(name))
+    
+    # If it's an OTP url, return the token instead
+    # of the data.
+    if is_otp_url(decrypted):
+        decrypted = totp(decrypted)
+
+    pyperclip.copy(decrypted)
     print("Password copied to clipboard - this will clear in 20 seconds or if you press a key.")
     timeout = 20 
     kb_timout_hit(timeout)
@@ -268,19 +282,26 @@ def add(name=None):
 
     write_encrypted(name, pass1)
 
-    """
-    gpg = gnupg.GPG()
-    key = config["keyid"]
-    data = gpg.encrypt(pass1.encode("utf-8"), key)
 
-    data_path = os.path.dirname(outfile)
-    ic(data_path)
-    if not os.path.exists(data_path):
-        pathlib.Path(data_path).mkdir(parents=True)
+@handles("import")
+def handle_import(name: str):
+    if name is None:
+        print("Key name not specified.", file=sys.stderr)
+        sys.exit(-1)
+    
+    data = sys.stdin.read()
+    write_encrypted(name, data)
 
-    with open(outfile, "w") as of:
-        of.write(str(data))z
-    """
+@handles("import-otp")
+def otp_import(*args):
+    for data in sys.stdin.readlines():
+        data = data.strip()
+        otp = pyotp.parse_uri(data)
+        if otp.issuer is not None:
+            name = os.path.join("otp", otp.issuer, otp.name)
+        else:
+            name = os.path.join("otp", otp.name)
+        write_encrypted(name, data)
 
 
 @handles("show", "s")
@@ -288,7 +309,13 @@ def show(name=None):
     if name is None:
         name = prompt_name(True)
 
-    decrypted = decrypt(name)
+    decrypted = str(decrypt(name))
+
+    # If it's an OTP url, return the token instead
+    # of the data.
+    if is_otp_url(decrypted):
+        decrypted = totp(decrypted)
+
     print(decrypted)
 
 
