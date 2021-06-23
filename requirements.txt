@@ -1,0 +1,11 @@
+asttokens==2.0.5
+colorama==0.4.4
+executing==0.6.0
+icecream==2.1.0
+prompt-toolkit==3.0.19
+Pygments==2.9.0
+pyperclip==1.8.2
+python-gnupg==0.4.7
+PyYAML==5.4.1
+six==1.16.0
+wcwidth==0.2.5
