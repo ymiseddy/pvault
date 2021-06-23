@@ -4,7 +4,9 @@
 # Vim swap files.
 *.swp
 
+# Scratch files
 
+scratch*.*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
