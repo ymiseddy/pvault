@@ -1,0 +1,134 @@
+= pvault - Python based cli password manager
+
+== About
+
+A python based password manager which works on Linux installs as well as
+Windows.  This is very much based on the https://www.passwordstore.org/[Standard
+Unix Password Manager] and with a bit of work, may be compatible with the
+password stores.  
+
+
+== Requirements
+
+This tool requires python3.8 and the requirements outlined in the
+`requirements.txt` file.   Additionally, a copy of GPG should be 
+installed and in the path.   
+
+Since this relies on the users GPG private key, this should be 
+setup as normal:
+
+```
+gpg --generate-key
+```
+
+== Getting Started
+
+Clone the repository:
+
+```
+git clone https://github.com/ymiseddy/pvault.git
+
+```
+
+Change into the new directory and set up a virtual environment and install the requirements:
+
+```
+cd pvault
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirments.txt
+```
+
+The `vault` file contains a bash script which will execute the `vault.py`
+application from a Linux terminal.    This can be symlinked to a folder in the
+path if desired.
+
+TODO: Windows instructions
+
+== Initializing the Password Vault
+
+To initialize the vault, run the following - inserting your GPG key id (or email
+address used to identify the key).    If you do not provide a key, you will be
+prompted for it with text-completion while you type.
+
+```
+vault init <gpg-key>
+```
+
+This will create the `.vault` directory in your home folder which will contain
+your encrypted passwords.   If you need to copy your passwords to another
+machine, or back them up, this where they are located.
+
+== Adding a Password
+
+To add a password:
+
+```
+vault add <name>
+```
+
+If you do not provide a name, you will be prompted for one.
+
+Names should consist of valid filename characters.   You can structure your
+passwords into subdirectories using a path separator `/` (or `\` in Windows).
+
+== Updating an Existing Password
+
+To update an existing password just run `vault add` again with the same name.
+It will replace the password already stored.
+
+== Multi-Line Secrets
+
+More than just passwords, you can also store multi-line secrets in your vault.
+
+```
+vault -e <name>
+```
+
+This works similar to add, but will not mask what you are typing and allow you
+to enter muliple lines of text.   This can be used for certificates or other
+secrets (command lines containing passwords and such).
+
+When you are finished, you can end by either pressing `Alt-Enter` or `Escape` followed by `Enter`.
+
+== Secrets to Clipboard
+
+The following will copy a secret to the clipboard for a limited period of time:
+
+```
+vault clip <name>
+```
+
+You will be notified of the duration and can clear it early by pressing a key.
+
+== Secrets to Console
+
+To display the secret on the password:
+
+```
+vault show <name>
+```
+
+WARNING: Needless to say, ensure you are in a secure location with nobody looking over your shoulder.
+
+TIP: Vault will output the secret to the stdout so it can be used as input to another command using pipe.
+
+== List Secret Names
+
+This command will display a list of secret names to your console.
+
+```
+vault list
+```
+
+== Help
+
+To see a quick summary of the commands (and abbreviations) type:
+
+```
+vault help
+```
+
+TODO: Contributing
+
+TODO: More Windows Instructions
