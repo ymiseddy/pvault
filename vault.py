@@ -10,6 +10,7 @@ import secrets
 import subprocess
 import pyotp
 import pyperclip
+
 from select import select
 from pathlib import Path
 from itertools import islice
@@ -110,6 +111,7 @@ def decrypt(name):
 
     return gpg.decrypt(data)
 
+
 def kb_timout_hit(timeout):
     if os.name == "nt":
         startTime = time.time()
@@ -121,6 +123,7 @@ def kb_timout_hit(timeout):
                 break
     else:
         rlist, wlist, xlist = select([sys.stdin], [], [], timeout)
+
 
 class ExistsInList(Validator):
     def __init__(self, items):
@@ -144,6 +147,7 @@ def prompt_name(must_exist=False):
     name = prompt("Name: ", validator=validator, completer=secret_completer)
     return name
 
+
 def check_file(path):
     path = os.path.join(base_dir, path)
     base_path = pathlib.Path(base_dir).resolve()
@@ -163,8 +167,10 @@ def prompt_key():
     id, _ = name.split(":", 2)
     return id
 
+
 def is_otp_url(key: str):
     return key.startswith("otpauth://")
+
 
 def totp(url: str):
     otp = pyotp.parse_uri(url.strip())
@@ -207,7 +213,7 @@ def clip(name=None):
     if name is None:
         name = prompt_name(True)
     decrypted = str(decrypt(name))
-    
+
     # If it's an OTP url, return the token instead
     # of the data.
     if is_otp_url(decrypted):
@@ -264,8 +270,6 @@ def write_encrypted(name, data):
         of.write(str(data))
 
 
-
-
 @handles("add", "a")
 def add(name=None):
     if name is None:
@@ -288,9 +292,10 @@ def handle_import(name: str):
     if name is None:
         print("Key name not specified.", file=sys.stderr)
         sys.exit(-1)
-    
+
     data = sys.stdin.read()
     write_encrypted(name, data)
+
 
 @handles("import-otp")
 def otp_import(*args):
