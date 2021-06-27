@@ -40,6 +40,22 @@ vault <command>
 
 """
 
+def generate(length=15, upper_case=True, digits=True, punctuation=True):
+    set = [string.ascii_lowercase]
+    if upper_case:
+        set.append(string.ascii_uppercase)
+    if digits:
+        set.append(string.digits)
+    if punctuation:
+        set.append(string.punctuation)
+
+    characters = "".join(set)
+    key = "".join([secrets.choice(characters) for c in range(length)])
+    return key
+
+
+
+
 def handles(*args):
     def do_handle(cb):
         for name in args:
@@ -298,6 +314,9 @@ def list(_=None):
     for s in secrets:
         print(s)
 
+@handles("generate", "g")
+def handle_generate(length=15):
+    print(generate(length)) 
 
 def handle(cmd, args):
     if cmd in ["u", "usage"]:
