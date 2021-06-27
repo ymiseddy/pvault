@@ -1,5 +1,4 @@
 import os
-import pathlib
 import sys
 import time
 from select import select
@@ -13,7 +12,7 @@ from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.validation import Validator, ValidationError
 
-# Debug only
+from tools import find_key_by_name, Vault
 
 # Need a MSVcrt for windows
 if os.name == "nt":
@@ -31,67 +30,6 @@ def get_key_list():
         uids = " ".join(key["uids"])
         options.append(f"{id}: {uids}")
     return options
-
-
-def find_key_by_name(name):
-    gpg = gnupg.GPG()
-    keys = gpg.list_keys(True)
-    for key in keys:
-        if key["keyid"] == name:
-            return key
-
-        for id in key["uids"]:
-            if name in id:
-                return key
-
-
-def get_secret_names(include_directories=False):
-    list = []
-    for r, d, f in os.walk(base_dir):
-        if include_directories:
-            fd = r[len(base_dir) + 1:]
-            list.append(fd + os.sep)
-
-        for file in f:
-            if not file.endswith(".gpg"):
-                continue
-
-            ff = os.path.join(r, file)
-            fd = ff[len(base_dir) + 1:-4]
-            list.append(fd)
-
-    return list
-
-
-def read_config():
-    config_file = os.path.join(base_dir, "config.yml")
-    if not os.path.exists(config_file):
-        return None
-
-    with open(config_file, "r") as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def try_read_config():
-    config = read_config()
-    if config is None:
-        sys.stderr.write("Vault is not initialized.  Try vault init")
-        sys.exit(-1)
-
-
-def decrypt(name):
-    infile = check_file(name) + ".gpg"
-
-    if not os.path.exists(infile):
-        print(f"The no secret named '{name}' exists.")
-        sys.exit(-1)
-
-    with open(infile, "r") as f:
-        data = f.read()
-    gpg = gnupg.GPG()
-
-    return gpg.decrypt(data)
 
 
 def kb_timout_hit(timeout):
@@ -131,16 +69,6 @@ def prompt_name(must_exist=False):
     return name
 
 
-def check_file(path):
-    path = os.path.join(base_dir, path)
-    base_path = pathlib.Path(base_dir).resolve()
-    resolved = pathlib.Path(path).resolve()
-    if base_path not in (resolved, *resolved.parents):
-        print("Tricky path detected.")
-        sys.exit(-1)
-    return str(resolved)
-
-
 def prompt_key():
     gpg_keys = get_key_list()
     secret_completer = WordCompleter(gpg_keys, sentence=True, match_middle=True)
@@ -158,22 +86,6 @@ def is_otp_url(key: str):
 def totp(url: str):
     otp = pyotp.parse_uri(url.strip())
     return otp.now()
-
-
-def write_encrypted(name, data):
-    config = read_config()
-    outfile = check_file(name) + ".gpg"
-
-    gpg = gnupg.GPG()
-    key = config["keyid"]
-    data = gpg.encrypt(data.encode("utf-8"), key)
-
-    data_path = os.path.dirname(outfile)
-    if not os.path.exists(data_path):
-        pathlib.Path(data_path).mkdir(parents=True)
-
-    with open(outfile, "w") as of:
-        of.write(str(data))
 
 
 class AliasedGroup(click.Group):
@@ -253,11 +165,9 @@ def init(keyname=None):
 @click.argument("name", required=False)
 def add(name=None):
     """ Add a secret to the vault. """
-    try_read_config()
+    vault = Vault()
     if name is None:
         name = prompt_name()
-
-    outfile = check_file(name) + ".gpg"
 
     pass1 = prompt("Password:", is_password=True)
     pass2 = prompt("Verify:", is_password=True)
@@ -266,7 +176,7 @@ def add(name=None):
         print("Passwords do not match.")
         sys.exit(-1)
 
-    write_encrypted(name, pass1)
+    vault.write(name, pass1)
 
 
 @cli.command()
@@ -274,31 +184,28 @@ def add(name=None):
 @click.argument("name", required=False)
 def edit(name=None):
     """ create or edit a new multi-line secret. """
-
-    try_read_config()
+    vault = Vault()
     if name is None:
         name = prompt_name()
-    dest_file = check_file(name) + ".gpg"
 
-    default = ""
-    if os.path.exists(dest_file):
-        default = str(decrypt(name))
+    default = vault.try_decrypt(name)
+    default = str(default) if default is not None else ""
 
-    print("Multiline editor - press M-Enter (or escapt then enter) when done.")
+    print("Multiline editor - press M-Enter (or escape then enter) when done.")
     edited = prompt(default=default, multiline=True)
 
-    write_encrypted(name, edited)
+    vault.write(name, edited)
 
 
 @cli.command()
 @click.argument("name", required=False)
 @alias("s")
 def show(name=None):
-    try_read_config()
+    vault = Vault()
     if name is None:
         name = prompt_name(True)
 
-    decrypted = str(decrypt(name))
+    decrypted = str(vault.decrypt(name))
 
     # If it's an OTP url, return the token instead
     # of the data.
@@ -311,8 +218,8 @@ def show(name=None):
 @cli.command(name="list")
 @alias("ls", alt="list")
 def do_list():
-    try_read_config()
-    secret_list = get_secret_names()
+    vault = Vault()
+    secret_list = vault.list()
     for s in secret_list:
         print(s)
 
@@ -321,18 +228,18 @@ def do_list():
 @alias("i")
 @click.argument("name", required=True)
 def do_import(name=None):
-    try_read_config()
+    vault = Vault()
 
     if name is None:
         name = prompt_name()
 
     data = sys.stdin.read()
-    write_encrypted(name, data)
+    vault.write(name, data)
 
 
 @cli.command(name="otp")
 def import_otp():
-    try_read_config()
+    vault = Vault()
 
     for data in sys.stdin.readlines():
         data = data.strip()
@@ -341,16 +248,16 @@ def import_otp():
             name = os.path.join("otp", otp.issuer, otp.name)
         else:
             name = os.path.join("otp", otp.name)
-        write_encrypted(name, data)
+        vault.write(name, data)
 
 
 @cli.command()
 @click.argument("name", required=False)
 def clip(name=None):
-    try_read_config()
+    vault = Vault()
     if name is None:
         name = prompt_name(True)
-    decrypted = str(decrypt(name))
+    decrypted = str(vault.decrypt(name))
 
     # If it's an OTP url, return the token instead
     # of the data.
@@ -368,9 +275,8 @@ def clip(name=None):
 @click.argument("name", required=False)
 def remove(name=None):
     """ remove a secret from the vault. """
-    config = try_read_config()
+    vault = Vault()
 
 
 if __name__ == "__main__":
-    read_config()
     cli()
