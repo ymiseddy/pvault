@@ -1,5 +1,6 @@
 # IDE Files
 .vscode/
+.idea/
 
 # Vim swap files.
 *.swp
