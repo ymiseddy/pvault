@@ -2,6 +2,27 @@ import pathlib
 import os
 import yaml
 import gnupg
+import secrets
+import string
+
+
+def generate(length=15, characters=None, digits=True, symbols=True, lowercase=True, uppercase=True):
+    if characters is None:
+        characters = ""
+        if digits:
+            characters += string.digits
+        if lowercase:
+            characters += string.ascii_lowercase
+        if uppercase:
+            characters += string.ascii_uppercase
+        if symbols:
+            characters += string.punctuation
+
+    if not len(characters):
+        raise Exception("No characters to choose from.")
+
+    chosen = [secrets.choice(characters) for x in range(length)]
+    return "".join(chosen)
 
 
 def find_key_by_name(name):
@@ -27,6 +48,7 @@ def read_config(base_dir):
 
 
 class Vault:
+
     def __init__(self, config=None, base_dir=None):
         if base_dir is None:
             base_dir = os.path.expanduser("~/.vault")
@@ -65,6 +87,14 @@ class Vault:
             raise Exception("Tricky path detected.")
         return str(resolved)
 
+    def remove(self, name):
+        path = self.check_file(name) + ".gpg"
+        if not os.path.exists(path):
+            raise Exception("Key not found.")
+
+        # TODO: Maybe we should check for empty directories as well?
+        os.remove(path)
+
     def write(self, name, data):
         outfile = self.check_file(name) + ".gpg"
 
@@ -78,7 +108,6 @@ class Vault:
 
         with open(outfile, "w") as of:
             of.write(str(data))
-
 
     def decrypt(self, name):
         infile = self.check_file(name) + ".gpg"

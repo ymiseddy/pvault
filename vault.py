@@ -11,8 +11,9 @@ import yaml
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.validation import Validator, ValidationError
+from icecream import ic
 
-from tools import find_key_by_name, Vault
+from tools import find_key_by_name, generate, Vault
 
 # Need a MSVcrt for windows
 if os.name == "nt":
@@ -42,7 +43,7 @@ def kb_timout_hit(timeout):
             elif time.time() - startTime > timeout:
                 break
     else:
-        rlist, wlist, xlist = select([sys.stdin], [], [], timeout)
+        _, _, _ = select([sys.stdin], [], [], timeout)
 
 
 class ExistsInList(Validator):
@@ -54,9 +55,9 @@ class ExistsInList(Validator):
             raise ValidationError(message=f"Secret {document.text} does not exist.")
 
 
-def prompt_name(must_exist=False):
+def prompt_name(vault: Vault, must_exist=False):
     include_directories = not must_exist
-    secrets = get_secret_names(include_directories)
+    secrets = vault.list(include_directories)
     if must_exist and not secrets:
         print("There are no secrets to list.  Try adding some.")
         sys.exit(-1)
@@ -91,7 +92,6 @@ def totp(url: str):
 class AliasedGroup(click.Group):
 
     def get_command(self, ctx, cmd_name):
-        print(f"resolving {cmd_name}")
         rv = click.Group.get_command(self, ctx, cmd_name)
         if rv is not None:
             return rv
@@ -122,28 +122,37 @@ def alias(name, alt=None):
 
 
 @click.group(cls=AliasedGroup)
-def cli():
-    pass
+@click.option("--vault-location", "-l", default=None)
+@click.pass_context
+def cli(ctx, vault_location=None):
+    """cli tool for managing secrets."""
+    ctx.obj["location"] = vault_location
+
+    def get_vault():
+        return Vault(base_dir=vault_location)
+
+    ctx.obj.get_vault = get_vault
 
 
 @cli.command()
+@click.argument("key-name", required=False)
+@click.pass_context
 @alias("i")
-@click.argument("keyname", required=False)
-def init(keyname=None):
+def init(ctx, key_name=None):
     """ initialize a new vault. """
-    config_dir = base_dir
+    config_dir = ctx.obj.location
     config_file = os.path.join(config_dir, "config.yml")
 
     if os.path.exists(config_file):
         print("A config file already exists.")
         sys.exit(-1)
 
-    if keyname is None:
-        keyname = prompt_key()
+    if key_name is None:
+        key_name = prompt_key()
 
     config = {}
 
-    key = find_key_by_name(keyname)
+    key = find_key_by_name(key_name)
     if not key:
         print("Key not found.")
         sys.exit(-1)
@@ -151,8 +160,8 @@ def init(keyname=None):
     print(f'Using key {key["keyid"]} ')
     config["keyid"] = key["keyid"]
 
-    if not os.path.isdir(base_dir):
-        os.mkdir(base_dir)
+    if not os.path.isdir(config_dir):
+        os.mkdir(config_dir)
 
     with open(config_file, "w") as f:
         yaml.dump(config, f)
@@ -161,13 +170,14 @@ def init(keyname=None):
 
 
 @cli.command()
-@alias("a")
 @click.argument("name", required=False)
-def add(name=None):
+@click.pass_context
+@alias("a")
+def add(ctx, name=None):
     """ Add a secret to the vault. """
-    vault = Vault()
+    vault = ctx.obj.get_vault()
     if name is None:
-        name = prompt_name()
+        name = prompt_name(vault)
 
     pass1 = prompt("Password:", is_password=True)
     pass2 = prompt("Verify:", is_password=True)
@@ -180,13 +190,14 @@ def add(name=None):
 
 
 @cli.command()
-@alias("e")
 @click.argument("name", required=False)
-def edit(name=None):
+@click.pass_context
+@alias("e")
+def edit(ctx, name=None):
     """ create or edit a new multi-line secret. """
-    vault = Vault()
+    vault = ctx.obj.get_vault()
     if name is None:
-        name = prompt_name()
+        name = prompt_name(vault)
 
     default = vault.try_decrypt(name)
     default = str(default) if default is not None else ""
@@ -199,11 +210,13 @@ def edit(name=None):
 
 @cli.command()
 @click.argument("name", required=False)
+@click.pass_context
 @alias("s")
-def show(name=None):
-    vault = Vault()
+def show(ctx, name=None):
+    """displays the secret on stdout."""
+    vault = ctx.obj.get_vault()
     if name is None:
-        name = prompt_name(True)
+        name = prompt_name(vault, True)
 
     decrypted = str(vault.decrypt(name))
 
@@ -216,30 +229,36 @@ def show(name=None):
 
 
 @cli.command(name="list")
+@click.pass_context
 @alias("ls", alt="list")
-def do_list():
-    vault = Vault()
+def do_list(ctx):
+    """list stored secret names."""
+    vault = ctx.obj.get_vault()
     secret_list = vault.list()
     for s in secret_list:
         print(s)
 
 
 @cli.command(name="import")
-@alias("i")
+@click.pass_context
 @click.argument("name", required=True)
-def do_import(name=None):
-    vault = Vault()
+@alias("i")
+def do_import(ctx, name=None):
+    """reads the contents of the secret from stdin."""
+    vault = ctx.obj.get_vault()
 
     if name is None:
-        name = prompt_name()
+        name = prompt_name(vault)
 
     data = sys.stdin.read()
     vault.write(name, data)
 
 
 @cli.command(name="otp")
-def import_otp():
-    vault = Vault()
+@click.pass_context
+def import_otp(ctx):
+    """import an OTP secret from stdin."""
+    vault = ctx.obj.get_vault()
 
     for data in sys.stdin.readlines():
         data = data.strip()
@@ -253,10 +272,12 @@ def import_otp():
 
 @cli.command()
 @click.argument("name", required=False)
-def clip(name=None):
-    vault = Vault()
+@click.pass_context
+def clip(ctx, name=None):
+    """copy the secret to the clipboard for a short period of time."""
+    vault = ctx.obj.get_vault()
     if name is None:
-        name = prompt_name(True)
+        name = prompt_name(vault, True)
     decrypted = str(vault.decrypt(name))
 
     # If it's an OTP url, return the token instead
@@ -273,10 +294,49 @@ def clip(name=None):
 
 @cli.command()
 @click.argument("name", required=False)
-def remove(name=None):
+@click.pass_context
+@alias("rm")
+def remove(ctx, name=None):
     """ remove a secret from the vault. """
-    vault = Vault()
+    vault = ctx.obj.get_vault()
+    if name is None:
+        name = prompt_name(vault, True)
+    vault.remove(name)
+
+
+@cli.command(name="generate")
+@click.argument("name", required=False)
+@click.option("--length", type=click.IntRange(1, 1000), default=15, required=False)
+@click.option("--digits", type=click.BOOL, default=True)
+@click.option("--lowercase", type=click.BOOL, default=True)
+@click.option("--uppercase", type=click.BOOL, default=True)
+@click.option("--echo", type=click.BOOL, default=False)
+@click.option("--symbols", type=click.BOOL, default=True)
+@click.pass_context
+@alias("gen", alt="generate")
+def do_generate(ctx, name, length=15, digits=True, lowercase=True, uppercase=True, symbols=True, echo=False):
+    vault = ctx.obj.get_vault()
+    if name is None:
+        name = prompt_name(vault, False)
+    res = generate(length,
+                   digits=digits,
+                   lowercase=lowercase,
+                   uppercase=uppercase,
+                   symbols=symbols)
+    vault.write(name, res)
+    if echo:
+        print(res)
+
+
+class AttrDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
 
 
 if __name__ == "__main__":
-    cli()
+    try:
+        cli(obj=AttrDict())
+    except Exception as ex:
+        print(ex)
+        ic(ex)
