@@ -1,4 +1,4 @@
-import click
+#!/usr/bin/env python3
 import gnupg
 import os
 import time
@@ -26,9 +26,32 @@ if os.name == "nt":
     import msvcrt
 
 base_dir = os.path.expanduser("~/.vault")
+command_handlers = {}
+
+usage_str = """
+vault <command>
+
+    init <gpgkey>   - initilizes the vault store and uses the specified gpg key
+                      for encryption.
+    add|a <name>    - adds a new password (prompts for password).
+    list|ls         - lists stored password names.
+    edit|e <name>   - multi-line editor for adding/editing multi-line secrets.
+    show|s <name>   - displays on output.
+    clip|c <name>   - copies the named secret to the clipboard.
+    help|h          - displays this message.
+
+"""
+
+def handles(*args):
+    def do_handle(cb):
+        for name in args:
+            command_handlers[name] = cb
+        return cb
+
+    return do_handle
 
 
-def get_key_list():
+def list_keys():
     gpg = gnupg.GPG()
     keys = gpg.list_keys(True)
     options = []
@@ -68,23 +91,11 @@ def get_secret_names(include_directories=False):
 
     return list
 
-
 def read_config():
+    global config
     config_file = os.path.join(base_dir, "config.yml")
-    if not os.path.exists(config_file):
-        return None
-
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
-    return config
-
-
-def try_read_config():
-    config = read_config()
-    if config is None:
-        sys.stderr.write("Vault is not initialized.  Try vault init")
-        sys.exit(-1)
-
 
 
 def decrypt(name):
@@ -148,7 +159,7 @@ def check_file(path):
 
 
 def prompt_key():
-    gpg_keys = get_key_list()
+    gpg_keys = list_keys()
     secret_completer  = WordCompleter(gpg_keys, sentence=True, match_middle=True)
     validator = ExistsInList(gpg_keys)
 
@@ -166,16 +177,8 @@ def totp(url: str):
     return otp.now()
 
 
-
-
-@click.group()
-def cli():
-    pass
-
-@cli.command()
-@click.argument("keyname", required=False)
+@handles("init", "i")
 def init(keyname=None):
-    """ initialize a new vault. """
     config_dir = base_dir
     config_file = os.path.join(config_dir, "config.yml")
 
@@ -205,26 +208,154 @@ def init(keyname=None):
     print("Vault initialized.")
 
 
+@handles("clip", "c")
+def clip(name=None):
+    if name is None:
+        name = prompt_name(True)
+    decrypted = str(decrypt(name))
 
-@cli.command()
-@click.argument("name", required=False)
+    # If it's an OTP url, return the token instead
+    # of the data.
+    if is_otp_url(decrypted):
+        decrypted = totp(decrypted)
+
+    pyperclip.copy(decrypted)
+    print("Password copied to clipboard - this will clear in 20 seconds or if you press a key.")
+    timeout = 20 
+    kb_timout_hit(timeout)
+    pyperclip.copy("")
+
+
+@handles("edit", "e")
+def edit(name = None):
+    if name is None:
+        name = prompt_name()
+    dest_file = check_file(name) + ".gpg"
+
+    default = ""
+    if os.path.exists(dest_file):
+        default = str(decrypt(name))
+
+
+    print("Multiline editor - press M-Enter (or escapt then enter) when done.")
+    edited = prompt(default=default, multiline=True)
+
+    write_encrypted(name, edited)
+    """
+    gpg = gnupg.GPG()
+    key = config["keyid"]
+    data = gpg.encrypt(edited.encode("utf-8"), key)
+    with open(dest_file, "w") as of:
+            of.write(str(data))
+    """
+
+
+@handles("help", "h", "usage")
+def usage(none=None):
+    print(usage_str)
+
+
+def write_encrypted(name, data):
+    outfile = check_file(name) + ".gpg"
+
+    gpg = gnupg.GPG()
+    key = config["keyid"]
+    data = gpg.encrypt(data.encode("utf-8"), key)
+
+    data_path = os.path.dirname(outfile)
+    if not os.path.exists(data_path):
+        pathlib.Path(data_path).mkdir(parents=True)
+
+    with open(outfile, "w") as of:
+        of.write(str(data))
+
+
+@handles("add", "a")
 def add(name=None):
-    """ Add a secret to the vault. """
-    config = try_read_config()
+    if name is None:
+        name = prompt_name()
+
+    outfile = check_file(name) + ".gpg"
+
+    pass1 = prompt("Password:", is_password=True)
+    pass2 = prompt("Verify:", is_password=True)
+
+    if pass1 != pass2:
+        print("Passwords do not match.")
+        sys.exit(-1)
+
+    write_encrypted(name, pass1)
 
 
-@cli.command()
-@click.argument("name", required=False)
-def edit(name=None):
-    """ create or edit a new multi-line secret. """
-    config = try_read_config()
+@handles("import")
+def handle_import(name: str):
+    if name is None:
+        print("Key name not specified.", file=sys.stderr)
+        sys.exit(-1)
 
-@cli.command()
-@click.argument("name", required=False)
-def remove(name=None):
-    """ remove a secret from the vault. """
-    config = try_read_config()
+    data = sys.stdin.read()
+    write_encrypted(name, data)
+
+
+@handles("import-otp")
+def otp_import(*args):
+    for data in sys.stdin.readlines():
+        data = data.strip()
+        otp = pyotp.parse_uri(data)
+        if otp.issuer is not None:
+            name = os.path.join("otp", otp.issuer, otp.name)
+        else:
+            name = os.path.join("otp", otp.name)
+        write_encrypted(name, data)
+
+
+@handles("show", "s")
+def show(name=None):
+    if name is None:
+        name = prompt_name(True)
+
+    decrypted = str(decrypt(name))
+
+    # If it's an OTP url, return the token instead
+    # of the data.
+    if is_otp_url(decrypted):
+        decrypted = totp(decrypted)
+
+    print(decrypted)
+
+
+@handles("list", "ls")
+def list(_=None):
+    secrets = get_secret_names()
+    for s in secrets:
+        print(s)
+
+
+def handle(cmd, args):
+    if cmd in ["u", "usage"]:
+        usage(*args)
+        sys.exit(0)
+
+    if cmd in ["init", "i"]:
+        init(*args)
+        sys.exit(0)
+
+    if not os.path.isdir(base_dir):
+        print("Vault not initialized. You can initialize using:")
+        print("     vault init <gpg key>")
+        sys.exit(-1)
+
+    if not cmd in command_handlers:
+        print(f"Command not found {cmd}")
+        usage(*args)
+        sys.exit(-1)
+
+    read_config()
+    command_handlers[cmd](*args)
+
 
 if __name__ == "__main__":
-    read_config()
-    cli()
+    cmd = "usage"
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+    handle(cmd, sys.argv[2:])
