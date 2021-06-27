@@ -166,13 +166,42 @@ def totp(url: str):
     return otp.now()
 
 
+class AliasedGroup(click.Group):
+
+    def get_command(self, ctx, cmd_name):
+        rv = click.Group.get_command(self, ctx, cmd_name)
+        if rv is not None:
+            return rv
+
+        if cmd_name not in AliasedGroup.aliases:
+            return None
+
+        return click.Group.get_command(self, ctx, AliasedGroup.aliases[cmd_name])
 
 
-@click.group()
+    def resolve_command(self, ctx, args):
+        # always return the full command name
+        _, cmd, args = super().resolve_command(ctx, args)
+        return cmd.name, cmd, args
+AliasedGroup.aliases = {}
+
+
+def alias(*args):
+    def do_handle(cb):
+        for name in args:
+            actual_command = cb.__name__
+            AliasedGroup.aliases[name] = actual_command
+        return cb
+
+    return do_handle
+
+
+@click.group(cls=AliasedGroup)
 def cli():
     pass
 
 @cli.command()
+@alias("i")
 @click.argument("keyname", required=False)
 def init(keyname=None):
     """ initialize a new vault. """
@@ -207,6 +236,7 @@ def init(keyname=None):
 
 
 @cli.command()
+@alias("a")
 @click.argument("name", required=False)
 def add(name=None):
     """ Add a secret to the vault. """
@@ -214,6 +244,7 @@ def add(name=None):
 
 
 @cli.command()
+@alias("e")
 @click.argument("name", required=False)
 def edit(name=None):
     """ create or edit a new multi-line secret. """
