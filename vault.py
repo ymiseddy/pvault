@@ -8,10 +8,10 @@ import gnupg
 import pyotp
 import pyperclip
 import yaml
+import re
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.validation import Validator, ValidationError
-from icecream import ic
 
 from tools import find_key_by_name, generate, Vault
 
@@ -19,28 +19,26 @@ from tools import find_key_by_name, generate, Vault
 if os.name == "nt":
     import msvcrt
 
-base_dir = os.path.expanduser("~/.vault")
-
 
 def get_key_list():
     gpg = gnupg.GPG()
     keys = gpg.list_keys(True)
     options = []
     for key in keys:
-        id = key["keyid"]
+        key_id = key["keyid"]
         uids = " ".join(key["uids"])
-        options.append(f"{id}: {uids}")
+        options.append(f"{key_id}: {uids}")
     return options
 
 
 def kb_timout_hit(timeout):
     if os.name == "nt":
-        startTime = time.time()
+        start_time = time.time()
         while True:
             if msvcrt.kbhit():
-                inp = msvcrt.getch()
+                _ = msvcrt.getch()
                 break
-            elif time.time() - startTime > timeout:
+            elif time.time() - start_time > timeout:
                 break
     else:
         _, _, _ = select([sys.stdin], [], [], timeout)
@@ -51,7 +49,7 @@ class ExistsInList(Validator):
         self.items = items
 
     def validate(self, document):
-        if not document.text in self.items:
+        if document.text not in self.items:
             raise ValidationError(message=f"Secret {document.text} does not exist.")
 
 
@@ -76,8 +74,8 @@ def prompt_key():
     validator = ExistsInList(gpg_keys)
 
     name = prompt("GPG Key: ", validator=validator, completer=secret_completer)
-    id, _ = name.split(":", 2)
-    return id
+    key_id, _ = name.split(":", 2)
+    return key_id
 
 
 def is_otp_url(key: str):
@@ -126,6 +124,10 @@ def alias(name, alt=None):
 @click.pass_context
 def cli(ctx, vault_location=None):
     """cli tool for managing secrets."""
+
+    if vault_location is None:
+        vault_location = os.path.expanduser("~/.vault")
+    
     ctx.obj["location"] = vault_location
 
     def get_vault():
@@ -141,7 +143,8 @@ def cli(ctx, vault_location=None):
 def init(ctx, key_name=None):
     """ initialize a new vault. """
     config_dir = ctx.obj.location
-    config_file = os.path.join(config_dir, "config.yml")
+    config_file = os.path.join(config_dir, ".config.yml")
+    id_file = os.path.join(config_dir, ".gpg-id")
 
     if os.path.exists(config_file):
         print("A config file already exists.")
@@ -160,11 +163,15 @@ def init(ctx, key_name=None):
     print(f'Using key {key["keyid"]} ')
     config["keyid"] = key["keyid"]
 
+    print(config_dir)
     if not os.path.isdir(config_dir):
         os.mkdir(config_dir)
 
     with open(config_file, "w") as f:
         yaml.dump(config, f)
+
+    with open(id_file, "w") as f:
+        f.write(key["keyid"])
 
     print("Vault initialized.")
 
@@ -219,7 +226,6 @@ def show(ctx, name=None):
         name = prompt_name(vault, True)
 
     decrypted = str(vault.decrypt(name))
-
     # If it's an OTP url, return the token instead
     # of the data.
     if is_otp_url(decrypted):
@@ -262,6 +268,8 @@ def import_otp(ctx):
 
     for data in sys.stdin.readlines():
         data = data.strip()
+        data = re.sub('^QR-Code:', '', data)
+        
         otp = pyotp.parse_uri(data)
         if otp.issuer is not None:
             name = os.path.join("otp", otp.issuer, otp.name)
@@ -272,9 +280,17 @@ def import_otp(ctx):
 
 @cli.command()
 @click.argument("name", required=False)
+@click.option("--duration", "-d", type=click.INT, default=20, required=False)
 @click.pass_context
-def clip(ctx, name=None):
-    """copy the secret to the clipboard for a short period of time."""
+def clip(ctx, name=None, duration=20):
+    """copy the secret to the clipboard for a short period of time.
+
+    The --duration option lets you specify a duration the secret will remain on the clipboard.
+    Passing a negative or zero duration will leave the secret on the clipboard and exit
+    immediately.
+
+    Pressing a key will terminate and clear the secret from the clipboard.
+    """
     vault = ctx.obj.get_vault()
     if name is None:
         name = prompt_name(vault, True)
@@ -286,10 +302,10 @@ def clip(ctx, name=None):
         decrypted = totp(decrypted)
 
     pyperclip.copy(decrypted)
-    print("Password copied to clipboard - this will clear in 20 seconds or if you press a key.")
-    timeout = 20
-    kb_timout_hit(timeout)
-    pyperclip.copy("")
+    if duration > 0:
+        print(f"Password copied to clipboard - this will clear in {duration} seconds or if you press a key.")
+        kb_timout_hit(duration)
+        pyperclip.copy("")
 
 
 @cli.command()
@@ -335,8 +351,9 @@ class AttrDict(dict):
 
 
 if __name__ == "__main__":
+    cli(obj=AttrDict())
     try:
-        cli(obj=AttrDict())
+        # cli(obj=AttrDict())
+        pass
     except Exception as ex:
         print(ex)
-        ic(ex)

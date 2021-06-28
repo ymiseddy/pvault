@@ -38,7 +38,7 @@ def find_key_by_name(name):
 
 
 def read_config(base_dir):
-    config_file = os.path.join(base_dir, "config.yml")
+    config_file = os.path.join(base_dir, ".config.yml")
     if not os.path.exists(config_file):
         return None
 
@@ -124,5 +124,5 @@ class Vault:
     def try_decrypt(self, name):
         try:
             return self.decrypt(name)
-        except _:
+        except Exception as _:
             return None
