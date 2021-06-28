@@ -12,8 +12,8 @@ import re
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.validation import Validator, ValidationError
-
-from tools import find_key_by_name, generate, Vault
+from vault_cls import Vault
+from tools import find_key_by_name, generate
 
 # Need a MSVcrt for windows
 if os.name == "nt":
@@ -282,6 +282,7 @@ def import_otp(ctx):
 @click.argument("name", required=False)
 @click.option("--duration", "-d", type=click.INT, default=20, required=False)
 @click.pass_context
+@alias("c")
 def clip(ctx, name=None, duration=20):
     """copy the secret to the clipboard for a short period of time.
 
