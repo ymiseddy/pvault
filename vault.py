@@ -59,7 +59,7 @@ def prompt_name(vault: Vault, must_exist=False):
     if must_exist and not secrets:
         print("There are no secrets to list.  Try adding some.")
         sys.exit(-1)
-    secret_completer = WordCompleter(secrets, sentence=True, match_middle=True)
+    secret_completer = WordCompleter(secrets, ignore_case=True, sentence=True, match_middle=True)
     validator = None
     if must_exist:
         validator = ExistsInList(secrets)
@@ -70,7 +70,7 @@ def prompt_name(vault: Vault, must_exist=False):
 
 def prompt_key():
     gpg_keys = get_key_list()
-    secret_completer = WordCompleter(gpg_keys, sentence=True, match_middle=True)
+    secret_completer = WordCompleter(gpg_keys, ignore_case=True, sentence=True, match_middle=True)
     validator = ExistsInList(gpg_keys)
 
     name = prompt("GPG Key: ", validator=validator, completer=secret_completer)
@@ -127,7 +127,7 @@ def cli(ctx, vault_location=None):
 
     if vault_location is None:
         vault_location = os.path.expanduser("~/.vault")
-    
+
     ctx.obj["location"] = vault_location
 
     def get_vault():
@@ -269,7 +269,7 @@ def import_otp(ctx):
     for data in sys.stdin.readlines():
         data = data.strip()
         data = re.sub('^QR-Code:', '', data)
-        
+
         otp = pyotp.parse_uri(data)
         if otp.issuer is not None:
             name = os.path.join("otp", otp.issuer, otp.name)
