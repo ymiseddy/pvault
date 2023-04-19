@@ -6,7 +6,6 @@ from select import select
 import click
 import gnupg
 import pyotp
-import pyperclip
 import yaml
 import re
 from prompt_toolkit import prompt
@@ -120,9 +119,10 @@ def alias(name, alt=None):
 
 
 @click.group(cls=AliasedGroup)
-@click.option("--vault-location", "-l", default=None)
+@click.option("--vault-location", "-l", default=None, help="Use a different vault location.")
+@click.option("--ask-password", "-p", is_flag=True, help="Prompt for the private key password (for cases when pinentry isn't available).")
 @click.pass_context
-def cli(ctx, vault_location=None):
+def cli(ctx, vault_location=None, ask_password=False):
     """cli tool for managing secrets."""
 
     if vault_location is None:
@@ -131,7 +131,7 @@ def cli(ctx, vault_location=None):
     ctx.obj["location"] = vault_location
 
     def get_vault():
-        return Vault(base_dir=vault_location)
+        return Vault(base_dir=vault_location, ask_password=ask_password)
 
     ctx.obj.get_vault = get_vault
 
@@ -292,6 +292,8 @@ def clip(ctx, name=None, duration=20):
 
     Pressing a key will terminate and clear the secret from the clipboard.
     """
+    import pyperclip
+
     vault = ctx.obj.get_vault()
     if name is None:
         name = prompt_name(vault, True)
@@ -301,6 +303,9 @@ def clip(ctx, name=None, duration=20):
     # of the data.
     if is_otp_url(decrypted):
         decrypted = totp(decrypted)
+
+    if decrypted is None or decrypted == '':
+        return
 
     pyperclip.copy(decrypted)
     if duration > 0:

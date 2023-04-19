@@ -1,12 +1,13 @@
 import os
 import pathlib
 import gnupg
+import getpass
 from tools import read_config
 
 
 class Vault:
 
-    def __init__(self, config=None, base_dir=None):
+    def __init__(self, config=None, base_dir=None, ask_password=False):
         """
         Vault class manages secrets.
 
@@ -22,7 +23,8 @@ class Vault:
 
         if config is None:
             raise Exception("Vault is not initialized.")
-
+        
+        self.ask_password = ask_password
         self._base_dir = base_dir
         self._config = config
 
@@ -85,7 +87,7 @@ class Vault:
         """
         outfile = self.check_file(name) + ".gpg"
 
-        gpg = gnupg.GPG()
+        gpg = gnupg.GPG(use_agent=True)
         key = self._config["keyid"]
         data = gpg.encrypt(data.encode("utf-8"), key)
 
@@ -95,6 +97,14 @@ class Vault:
 
         with open(outfile, "w") as of:
             of.write(str(data))
+
+
+    def _maybe_prompt_password(self):
+        if not self.ask_password:
+            return None
+
+        passphrase = getpass.getpass("Key Passphrase: ")
+        return passphrase
 
     def decrypt(self, name):
         """
@@ -110,9 +120,15 @@ class Vault:
 
         with open(infile, "r") as f:
             data = f.read()
-        gpg = gnupg.GPG()
 
-        return gpg.decrypt(data)
+        passphrase = self._maybe_prompt_password()
+        use_agent = True
+        if (passphrase is not None):
+            use_agent = False
+
+        gpg = gnupg.GPG(use_agent=use_agent)
+
+        return gpg.decrypt(data, passphrase=passphrase)
 
     def try_decrypt(self, name):
         """
